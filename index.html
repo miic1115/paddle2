@@ -328,8 +328,8 @@
             
             const data = await fetchData();
 
-            setProfiles(data.profiles);
-            setPracticeDates(data.dates);
+            setProfiles(data.profiles || []);
+            setPracticeDates(data.dates || []);
             
             const attMap = data.attendanceMap || {};
             setAttendance(attMap);
@@ -338,7 +338,7 @@
             const checkInMap = data.checkInMap || {};
             setRealStatus(checkInMap);
             
-            if (data.dates.length > 0) {
+            if (data.dates && data.dates.length > 0) {
               let bestDate = data.dates[0];
               try {
                 const today = new Date();
@@ -375,7 +375,10 @@
               } catch (e) { console.error("Month init error", e); }
             }
 
-            const boundUser = data.profiles.find(p => p.lineId === userId);
+            // 確保 profiles 存在
+            const userList = data.profiles || [];
+            const boundUser = userList.find(p => p.lineId === userId);
+            
             if (boundUser) {
               setCurrentUser(boundUser);
               setProxyUser(boundUser);
@@ -396,8 +399,8 @@
         setIsRefreshing(true);
         try {
           const data = await fetchData();
-          setProfiles(data.profiles);
-          setPracticeDates(data.dates);
+          setProfiles(data.profiles || []);
+          setPracticeDates(data.dates || []);
           
           setAttendance(data.attendanceMap || {});
           setInitialAttendance(JSON.parse(JSON.stringify(data.attendanceMap || {})));
@@ -448,11 +451,11 @@
           });
           showToast(`註冊成功！歡迎 ${newUserName}`);
           const data = await fetchData();
-          setProfiles(data.profiles);
-          setPracticeDates(data.dates);
+          setProfiles(data.profiles || []);
+          setPracticeDates(data.dates || []);
           setAttendance(data.attendanceMap || {});
           setInitialAttendance(JSON.parse(JSON.stringify(data.attendanceMap || {})));
-          const newUser = data.profiles.find(p => p.name === newUserName.trim());
+          const newUser = (data.profiles || []).find(p => p.name === newUserName.trim());
           if (newUser) {
             setCurrentUser(newUser);
             setProxyUser(newUser);
@@ -470,7 +473,7 @@
         try {
           const today = new Date();
           today.setHours(0, 0, 0, 0);
-          const cleanDate = dateStr.split('(')[0];
+          const cleanDate = String(dateStr).split('(')[0];
           const [m, d] = cleanDate.split('/').map(n => parseInt(n, 10));
           const year = today.getFullYear();
           const targetDate = new Date(year, m - 1, d);
@@ -581,7 +584,7 @@
       };
 
       const availableMonths = useMemo(() => {
-        if (!practiceDates.length) return [];
+        if (!practiceDates || !practiceDates.length) return [];
         const months = new Set();
         practiceDates.forEach(d => {
             const str = String(d);
@@ -591,8 +594,8 @@
       }, [practiceDates]);
 
       const filteredDates = useMemo(() => {
-        if (!selectedMonth) return practiceDates;
-        return practiceDates.filter(d => {
+        if (!selectedMonth) return practiceDates || [];
+        return (practiceDates || []).filter(d => {
             const str = String(d);
             return str.includes('/') && parseInt(str.split('/')[0], 10) === selectedMonth;
         });
@@ -620,7 +623,7 @@
       }, [selectedDate, attendance, realStatus, profiles]);
 
       const leaderboardData = useMemo(() => {
-        const pastDates = practiceDates.filter(d => isDateLocked(d));
+        const pastDates = (practiceDates || []).filter(d => isDateLocked(d));
         const sortedPastDates = [...pastDates].reverse();
 
         const stats = profiles.map(p => {
@@ -628,7 +631,7 @@
           let currentStreak = 0;
           let streakBroken = false;
 
-          practiceDates.forEach(d => {
+          (practiceDates || []).forEach(d => {
             if (isDateLocked(d)) {
               const s = getFinalStatus(p.name, d);
               if (['參加', '準時', '遲到'].includes(s)) a++;
@@ -671,7 +674,7 @@
             if (!selectedDate) return false;
             const today = new Date();
             today.setHours(0, 0, 0, 0); 
-            const cleanDate = selectedDate.split('(')[0];
+            const cleanDate = String(selectedDate).split('(')[0];
             const [m, d] = cleanDate.split('/').map(n => parseInt(n, 10));
             const year = today.getFullYear();
             const targetDate = new Date(year, m - 1, d);
@@ -697,20 +700,22 @@
         return null;
       };
 
-      // --- CF 邏輯區段 ---
+      // --- CF 邏輯區段 (增加型別安全防護) ---
       const currentCfMonthData = useMemo(() => {
-        return cfData.find(m => m.month === selectedCfMonth) || { classes: [], isPaid: false };
+        return (cfData || []).find(m => m.month === selectedCfMonth) || { classes: [], isPaid: false };
       }, [cfData, selectedCfMonth]);
 
       const myCfClassesThisMonth = useMemo(() => {
-        if (!currentUser) return [];
-        return currentCfMonthData.classes.filter(cls => cls.attendees.includes(currentUser.name));
+        if (!currentUser || !currentCfMonthData || !currentCfMonthData.classes) return [];
+        return currentCfMonthData.classes.filter(cls => {
+          const attendees = cls.attendees || [];
+          return attendees.includes(currentUser.name);
+        });
       }, [currentCfMonthData, currentUser]);
 
       const { cfUnitPrice, cfTotalCost, isCfEffectivelyShared, isCfFullMonthSelf } = useMemo(() => {
-        // 費用計算：只看有設定 fee: true 的課程/活動
         const myFeeClassCount = myCfClassesThisMonth.filter(c => c.fee).length;
-        const totalFeeClassesThisMonth = currentCfMonthData.classes.filter(c => c.fee).length;
+        const totalFeeClassesThisMonth = (currentCfMonthData.classes || []).filter(c => c.fee).length;
         
         const isFullMonthSelf = (myFeeClassCount === totalFeeClassesThisMonth && totalFeeClassesThisMonth > 0);
         const isUserDeclaredShared = cfSharedPackageStatus[selectedCfMonth] || false;
@@ -736,20 +741,21 @@
       const toggleCfAttendance = (classId) => {
         if (currentCfMonthData.isPaid) return; 
 
-        setCfData(prevData => prevData.map(monthObj => {
+        setCfData(prevData => (prevData || []).map(monthObj => {
           if (monthObj.month !== selectedCfMonth) return monthObj;
           return {
             ...monthObj,
-            classes: monthObj.classes.map(cls => {
+            classes: (monthObj.classes || []).map(cls => {
               if (cls.id === classId) {
-                const isAttending = cls.attendees.includes(currentUser.name);
-                if (!isAttending && cls.attendees.length >= 12) return cls;
+                const attendees = cls.attendees || [];
+                const isAttending = attendees.includes(currentUser.name);
+                if (!isAttending && attendees.length >= 12) return cls;
 
                 return {
                   ...cls,
                   attendees: isAttending 
-                    ? cls.attendees.filter(name => name !== currentUser.name)
-                    : [...cls.attendees, currentUser.name]
+                    ? attendees.filter(name => name !== currentUser.name)
+                    : [...attendees, currentUser.name]
                 };
               }
               return cls;
@@ -789,15 +795,16 @@
         }
       };
 
+      // 增強防呆：強制將傳入的參數轉為字串，避免傳入數字時引發 .split is not a function
       const renderDateBlock = (dateStr) => {
-        if (!dateStr || dateStr === 'Nule') {
+        if (!dateStr || String(dateStr) === 'Nule') {
           return (
             <div className="w-12 h-12 rounded-xl flex items-center justify-center bg-[#0d1f18] border border-emerald-900/30">
               <CalendarCheck className="w-5 h-5 text-emerald-500" />
             </div>
           );
         }
-        const parts = dateStr.split(' ');
+        const parts = String(dateStr).split(' ');
         return (
           <div className="w-12 h-12 rounded-xl flex flex-col items-center justify-center bg-[#0d1f18] border border-emerald-900/30">
             <span className="text-xs text-emerald-500 font-bold">{parts[0]}</span>
@@ -1162,7 +1169,7 @@
                 </div>
 
                 <div className="flex gap-3 mb-2 overflow-x-auto no-scrollbar pb-4 pt-1 px-1 -mx-1">
-                  {cfData.map(m => (
+                  {(cfData || []).map(m => (
                     <button 
                       key={m.month} 
                       onClick={() => setSelectedCfMonth(m.month)}
@@ -1184,16 +1191,16 @@
                       <h3 className="font-bold text-white text-sm">我 {selectedCfMonth} 月的報名狀況</h3>
                     </div>
                     <div className="text-xs text-gray-400">
-                      已報名 <span className="text-emerald-400 font-bold text-base mx-1">{myCfClassesThisMonth.length}</span> 項
+                      已報名 <span className="text-emerald-400 font-bold text-base mx-1">{(myCfClassesThisMonth || []).length}</span> 項
                     </div>
                   </div>
 
                   <div className="flex flex-col sm:flex-row justify-between items-start sm:items-end gap-4 mt-2">
                     <div className="flex flex-wrap gap-2 flex-1">
-                      {myCfClassesThisMonth.length > 0 ? (
+                      {myCfClassesThisMonth && myCfClassesThisMonth.length > 0 ? (
                         myCfClassesThisMonth.map(cls => (
                           <span key={cls.id} className="text-xs bg-[#1A1D1C] text-emerald-400 border border-emerald-900/50 px-2.5 py-1 rounded-md font-bold shadow-sm">
-                            {cls.date && cls.date !== 'Nule' ? cls.date.split(' ')[0] : '特別活動'}
+                            {cls.date && String(cls.date) !== 'Nule' ? String(cls.date).split(' ')[0] : '特別活動'}
                           </span>
                         ))
                       ) : (
@@ -1205,7 +1212,7 @@
                       <div 
                         onClick={toggleCfSharedStatus}
                         className={`flex items-center gap-2 group transition-opacity ${
-                          (isCfFullMonthSelf || currentCfMonthData.isPaid) ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'
+                          (isCfFullMonthSelf || currentCfMonthData?.isPaid) ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'
                         }`}
                       >
                         <button 
@@ -1224,14 +1231,14 @@
                       </div>
                       
                       <div className="text-sm font-bold flex items-center gap-2 mt-1">
-                        <span className="text-xs text-gray-400 font-normal">{myCfClassesThisMonth.filter(c => c.fee).length} 堂 × ${cfUnitPrice}</span>
+                        <span className="text-xs text-gray-400 font-normal">{(myCfClassesThisMonth || []).filter(c => c.fee).length} 堂 × ${cfUnitPrice}</span>
                         <span className="text-gray-300">
                           應繳 
-                          <span className={`ml-1 text-lg font-black tracking-wide ${currentCfMonthData.isPaid ? 'line-through text-gray-500' : 'text-emerald-500'}`}>
+                          <span className={`ml-1 text-lg font-black tracking-wide ${currentCfMonthData?.isPaid ? 'line-through text-gray-500' : 'text-emerald-500'}`}>
                             ${cfTotalCost}
                           </span>
                         </span>
-                        {currentCfMonthData.isPaid && (
+                        {currentCfMonthData?.isPaid && (
                           <span className="ml-1 text-[10px] bg-emerald-500/20 text-emerald-400 px-2 py-0.5 rounded border border-emerald-500/30 tracking-widest">
                             已對帳
                           </span>
@@ -1242,16 +1249,17 @@
                 </div>
 
                 <div className="space-y-4">
-                  {cfData.length === 0 && (
+                  {(!cfData || cfData.length === 0) && (
                     <div className="text-center text-gray-500 py-10 bg-[#171C1A] rounded-2xl border border-dashed border-emerald-900/30">目前尚無 CF 課程資料</div>
                   )}
-                  {currentCfMonthData.classes.length === 0 && cfData.length > 0 && (
+                  {currentCfMonthData?.classes?.length === 0 && cfData?.length > 0 && (
                     <div className="text-center text-gray-500 py-10 bg-[#171C1A] rounded-2xl border border-dashed border-emerald-900/30">本月無 CF 行程</div>
                   )}
                   
-                  {currentCfMonthData.classes.map((cls, index) => {
-                    const isAttending = cls.attendees.includes(currentUser.name);
-                    const isFull = cls.attendees.length >= 12;
+                  {(currentCfMonthData?.classes || []).map((cls, index) => {
+                    const attendees = cls.attendees || [];
+                    const isAttending = attendees.includes(currentUser?.name);
+                    const isFull = attendees.length >= 12;
                     const isLocked = currentCfMonthData.isPaid;
                     const canJoin = (!isLocked) && (isAttending || !isFull);
                     
@@ -1268,13 +1276,13 @@
                             {renderDateBlock(cls.date)}
                             <div>
                               <div className="font-bold text-base mb-0.5 flex items-center gap-2">
-                                {cls.time}
+                                {cls.time ? String(cls.time) : ''}
                               </div>
                               <div className="text-xs text-gray-400 flex items-center gap-1">
                                 <Users className="w-3.5 h-3.5" />
                                 <span>已報名: 
                                   <strong className={`ml-1 ${isFull ? 'text-red-400' : 'text-emerald-400'}`}>
-                                    {cls.attendees.length}
+                                    {attendees.length}
                                   </strong> / 12 人
                                 </span>
                               </div>
@@ -1298,13 +1306,13 @@
                         </div>
 
                         <div className="bg-[#0D1210]/60 px-4 py-3 border-t border-emerald-900/20">
-                          {cls.attendees.length > 0 ? (
+                          {attendees.length > 0 ? (
                             <div className="flex flex-wrap gap-2">
-                              {cls.attendees.map(name => (
+                              {attendees.map(name => (
                                 <span 
                                   key={name} 
                                   className={`text-[11px] px-2.5 py-1 rounded-md font-bold transition-all ${
-                                    name === currentUser.name 
+                                    name === currentUser?.name 
                                     ? 'bg-emerald-500 text-[#0a1a12] ring-2 ring-emerald-500/40 scale-105 z-10 shadow-sm' 
                                     : 'bg-[#171C1A] text-gray-400 border border-emerald-900/40'
                                   }`}
