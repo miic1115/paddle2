@@ -252,15 +252,36 @@
       const [cfSharedPackageStatus, setCfSharedPackageStatus] = useState({});
       const [hasCfUnsavedChanges, setHasCfUnsavedChanges] = useState(false);
       const [isCfSaving, setIsCfSaving] = useState(false);
+      const [cfError, setCfError] = useState(null); // 🌟 新增：CF 專用的明確錯誤狀態
 
-      // 載入 CF 資料函數
+      // 載入 CF 資料函數 (強化防呆與錯誤追蹤版)
       const loadCfData = async (userName) => {
         try {
+          setCfError(null); // 清除舊錯誤
           const res = await fetch(CF_API_URL, {
             method: 'POST',
+            redirect: 'follow',
+            headers: {
+              'Content-Type': 'text/plain;charset=utf-8',
+            },
             body: JSON.stringify({ action: 'getCFData', userName })
           });
-          const data = await res.json();
+          
+          const text = await res.text();
+          
+          if (text.includes("<html") || text.includes("<!DOCTYPE html>")) {
+             setCfError("API 權限被拒絕，請檢查 Google Sheet Apps Script 是否部署為「所有人」");
+             return;
+          }
+
+          let data;
+          try {
+             data = JSON.parse(text);
+          } catch (parseErr) {
+             setCfError("API 回傳了無法解析的格式，請檢查 Apps Script 是否有錯誤");
+             return;
+          }
+
           if (data.success && data.cfData) {
              setCfData(data.cfData);
              if (data.cfData.length > 0) {
@@ -271,8 +292,14 @@
                newSharedStatus[m.month] = m.isShared || false;
              });
              setCfSharedPackageStatus(prev => ({...prev, ...newSharedStatus}));
+          } else if (data.error) {
+             setCfError("CF 資料載入失敗: " + data.error);
+          } else {
+             setCfError("API 回傳格式缺少資料欄位");
           }
-        } catch(e) { console.error("CF Load error", e); }
+        } catch(e) { 
+          setCfError("無法連線至 CF API：" + e.message);
+        }
       };
 
       // 載入訊息輪播
@@ -375,14 +402,13 @@
               } catch (e) { console.error("Month init error", e); }
             }
 
-            // 確保 profiles 存在
             const userList = data.profiles || [];
             const boundUser = userList.find(p => p.lineId === userId);
             
             if (boundUser) {
               setCurrentUser(boundUser);
               setProxyUser(boundUser);
-              // 同時載入 CF 資料
+              // 同時載入 CF 資料，這裡不用 await 以免卡住主畫面
               loadCfData(boundUser.name);
             }
             setLoading(false);
@@ -700,7 +726,7 @@
         return null;
       };
 
-      // --- CF 邏輯區段 (增加型別安全防護) ---
+      // --- CF 邏輯區段 ---
       const currentCfMonthData = useMemo(() => {
         return (cfData || []).find(m => m.month === selectedCfMonth) || { classes: [], isPaid: false };
       }, [cfData, selectedCfMonth]);
@@ -771,6 +797,10 @@
           const attendingIds = myCfClassesThisMonth.map(cls => cls.id);
           const response = await fetch(CF_API_URL, {
             method: 'POST',
+            redirect: 'follow',
+            headers: {
+              'Content-Type': 'text/plain;charset=utf-8',
+            },
             body: JSON.stringify({
               action: "saveCFChanges",
               userName: currentUser.name,
@@ -780,7 +810,23 @@
             })
           });
           
-          const result = await response.json();
+          const text = await response.text();
+          
+          if (text.includes("<html") || text.includes("<!DOCTYPE html>")) {
+             alert("儲存失敗：API 權限錯誤，請確認 GAS 部署存取權限為「所有人」");
+             setIsCfSaving(false);
+             return;
+          }
+          
+          let result;
+          try {
+             result = JSON.parse(text);
+          } catch (e) {
+             alert("儲存失敗：伺服器回傳無效格式");
+             setIsCfSaving(false);
+             return;
+          }
+
           if (result.success) {
             setHasCfUnsavedChanges(false);
             showToast("CF 報名已儲存！");
@@ -789,13 +835,12 @@
             alert("儲存失敗：" + result.error);
           }
         } catch (err) {
-          alert("連線失敗");
+          alert("連線儲存失敗，請檢查網路");
         } finally {
           setIsCfSaving(false);
         }
       };
 
-      // 增強防呆：強制將傳入的參數轉為字串，避免傳入數字時引發 .split is not a function
       const renderDateBlock = (dateStr) => {
         if (!dateStr || String(dateStr) === 'Nule') {
           return (
@@ -1141,6 +1186,19 @@
             {/* 分頁 4: CF 訓練 (新增) */}
             {activeTab === 'cf' && (
               <div className="animate-in fade-in slide-in-from-bottom-3 duration-500">
+                {cfError && (
+                  <div className="bg-red-500/10 border border-red-500/30 rounded-xl p-4 mb-6 flex flex-col gap-2 shadow-sm animate-pop-in">
+                    <div className="flex items-center gap-2 text-red-400 font-bold">
+                      <AlertTriangle className="w-5 h-5" />
+                      <span>系統警告</span>
+                    </div>
+                    <p className="text-sm text-red-300">{cfError}</p>
+                    <button onClick={() => loadCfData(currentUser.name)} className="mt-2 self-start flex items-center gap-2 px-4 py-2 bg-red-500/20 text-red-400 rounded-lg hover:bg-red-500/30 transition-colors text-xs font-bold">
+                      <RefreshCcw className="w-3.5 h-3.5" /> 重試連線
+                    </button>
+                  </div>
+                )}
+
                 <div className="bg-gradient-to-br from-[#171C1A] to-[#0d1f18] p-5 rounded-2xl border border-emerald-900/40 mb-6 shadow-lg">
                   <div className="flex items-center gap-4 mb-4">
                     <div className="w-12 h-12 rounded-xl bg-emerald-500/20 border border-emerald-500/50 flex items-center justify-center shrink-0">
@@ -1184,73 +1242,80 @@
                   ))}
                 </div>
 
-                <div className="bg-[#262A28] border border-[#3C423F] rounded-2xl p-5 mb-8 shadow-md">
-                  <div className="flex items-center justify-between mb-4 border-b border-[#3C423F] pb-3">
-                    <div className="flex items-center gap-2">
-                      <CalendarCheck className="w-5 h-5 text-emerald-500" />
-                      <h3 className="font-bold text-white text-sm">我 {selectedCfMonth} 月的報名狀況</h3>
-                    </div>
-                    <div className="text-xs text-gray-400">
-                      已報名 <span className="text-emerald-400 font-bold text-base mx-1">{(myCfClassesThisMonth || []).length}</span> 項
-                    </div>
-                  </div>
-
-                  <div className="flex flex-col sm:flex-row justify-between items-start sm:items-end gap-4 mt-2">
-                    <div className="flex flex-wrap gap-2 flex-1">
-                      {myCfClassesThisMonth && myCfClassesThisMonth.length > 0 ? (
-                        myCfClassesThisMonth.map(cls => (
-                          <span key={cls.id} className="text-xs bg-[#1A1D1C] text-emerald-400 border border-emerald-900/50 px-2.5 py-1 rounded-md font-bold shadow-sm">
-                            {cls.date && String(cls.date) !== 'Nule' ? String(cls.date).split(' ')[0] : '特別活動'}
-                          </span>
-                        ))
-                      ) : (
-                        <span className="text-xs text-gray-500 italic">尚未報名本月課程</span>
-                      )}
-                    </div>
-
-                    <div className="flex flex-col items-start sm:items-end gap-2 w-full sm:w-auto mt-2 sm:mt-0 pt-3 sm:pt-0 border-t sm:border-none border-[#3C423F]">
-                      <div 
-                        onClick={toggleCfSharedStatus}
-                        className={`flex items-center gap-2 group transition-opacity ${
-                          (isCfFullMonthSelf || currentCfMonthData?.isPaid) ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'
-                        }`}
-                      >
-                        <button 
-                          type="button"
-                          className={`w-4 h-4 rounded-sm flex items-center justify-center shrink-0 transition-colors ${
-                            isCfEffectivelyShared 
-                              ? 'bg-emerald-500 border-emerald-500' 
-                              : 'bg-transparent border-gray-500 border'
-                          }`}
-                        >
-                          {isCfEffectivelyShared && <Check className="w-3 h-3 text-[#0a1a12]" strokeWidth={3} />}
-                        </button>
-                        <span className="text-xs text-gray-300 group-hover:text-white select-none">
-                          與隊友湊包月優惠 (250/堂)
-                        </span>
+                {cfData && cfData.length > 0 && (
+                  <div className="bg-[#262A28] border border-[#3C423F] rounded-2xl p-5 mb-8 shadow-md">
+                    <div className="flex items-center justify-between mb-4 border-b border-[#3C423F] pb-3">
+                      <div className="flex items-center gap-2">
+                        <CalendarCheck className="w-5 h-5 text-emerald-500" />
+                        <h3 className="font-bold text-white text-sm">我 {selectedCfMonth} 月的報名狀況</h3>
                       </div>
-                      
-                      <div className="text-sm font-bold flex items-center gap-2 mt-1">
-                        <span className="text-xs text-gray-400 font-normal">{(myCfClassesThisMonth || []).filter(c => c.fee).length} 堂 × ${cfUnitPrice}</span>
-                        <span className="text-gray-300">
-                          應繳 
-                          <span className={`ml-1 text-lg font-black tracking-wide ${currentCfMonthData?.isPaid ? 'line-through text-gray-500' : 'text-emerald-500'}`}>
-                            ${cfTotalCost}
-                          </span>
-                        </span>
-                        {currentCfMonthData?.isPaid && (
-                          <span className="ml-1 text-[10px] bg-emerald-500/20 text-emerald-400 px-2 py-0.5 rounded border border-emerald-500/30 tracking-widest">
-                            已對帳
-                          </span>
+                      <div className="text-xs text-gray-400">
+                        已報名 <span className="text-emerald-400 font-bold text-base mx-1">{(myCfClassesThisMonth || []).length}</span> 項
+                      </div>
+                    </div>
+
+                    <div className="flex flex-col sm:flex-row justify-between items-start sm:items-end gap-4 mt-2">
+                      <div className="flex flex-wrap gap-2 flex-1">
+                        {myCfClassesThisMonth && myCfClassesThisMonth.length > 0 ? (
+                          myCfClassesThisMonth.map(cls => (
+                            <span key={cls.id} className="text-xs bg-[#1A1D1C] text-emerald-400 border border-emerald-900/50 px-2.5 py-1 rounded-md font-bold shadow-sm">
+                              {cls.date && String(cls.date) !== 'Nule' ? String(cls.date).split(' ')[0] : '特別活動'}
+                            </span>
+                          ))
+                        ) : (
+                          <span className="text-xs text-gray-500 italic">尚未報名本月課程</span>
                         )}
                       </div>
+
+                      <div className="flex flex-col items-start sm:items-end gap-2 w-full sm:w-auto mt-2 sm:mt-0 pt-3 sm:pt-0 border-t sm:border-none border-[#3C423F]">
+                        <div 
+                          onClick={toggleCfSharedStatus}
+                          className={`flex items-center gap-2 group transition-opacity ${
+                            (isCfFullMonthSelf || currentCfMonthData?.isPaid) ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'
+                          }`}
+                        >
+                          <button 
+                            type="button"
+                            className={`w-4 h-4 rounded-sm flex items-center justify-center shrink-0 transition-colors ${
+                              isCfEffectivelyShared 
+                                ? 'bg-emerald-500 border-emerald-500' 
+                                : 'bg-transparent border-gray-500 border'
+                            }`}
+                          >
+                            {isCfEffectivelyShared && <Check className="w-3 h-3 text-[#0a1a12]" strokeWidth={3} />}
+                          </button>
+                          <span className="text-xs text-gray-300 group-hover:text-white select-none">
+                            與隊友湊包月優惠 (250/堂)
+                          </span>
+                        </div>
+                        
+                        <div className="text-sm font-bold flex items-center gap-2 mt-1">
+                          <span className="text-xs text-gray-400 font-normal">{(myCfClassesThisMonth || []).filter(c => c.fee).length} 堂 × ${cfUnitPrice}</span>
+                          <span className="text-gray-300">
+                            應繳 
+                            <span className={`ml-1 text-lg font-black tracking-wide ${currentCfMonthData?.isPaid ? 'line-through text-gray-500' : 'text-emerald-500'}`}>
+                              ${cfTotalCost}
+                            </span>
+                          </span>
+                          {currentCfMonthData?.isPaid && (
+                            <span className="ml-1 text-[10px] bg-emerald-500/20 text-emerald-400 px-2 py-0.5 rounded border border-emerald-500/30 tracking-widest">
+                              已對帳
+                            </span>
+                          )}
+                        </div>
+                      </div>
                     </div>
                   </div>
-                </div>
+                )}
 
                 <div className="space-y-4">
-                  {(!cfData || cfData.length === 0) && (
-                    <div className="text-center text-gray-500 py-10 bg-[#171C1A] rounded-2xl border border-dashed border-emerald-900/30">目前尚無 CF 課程資料</div>
+                  {(!cfData || cfData.length === 0) && !cfError && (
+                    <div className="text-center text-gray-500 py-10 bg-[#171C1A] rounded-2xl border border-dashed border-emerald-900/30 flex flex-col items-center">
+                      <p className="mb-4">目前尚無 CF 課程資料</p>
+                      <button onClick={() => loadCfData(currentUser.name)} className="flex items-center gap-2 px-4 py-2 bg-[#0d1f18] text-emerald-500 rounded-lg border border-emerald-900/50 hover:bg-emerald-500/10 transition-colors text-sm font-bold">
+                        <RefreshCcw className="w-4 h-4" /> 手動重新載入
+                      </button>
+                    </div>
                   )}
                   {currentCfMonthData?.classes?.length === 0 && cfData?.length > 0 && (
                     <div className="text-center text-gray-500 py-10 bg-[#171C1A] rounded-2xl border border-dashed border-emerald-900/30">本月無 CF 行程</div>
