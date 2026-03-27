@@ -47,6 +47,9 @@
     const LIFF_ID = "2009058776-fDhQPTf4"; // 您的 LIFF ID (可選)
 
     const App = () => {
+      // 🌟 新增常數：設定報名人數上限，方便未來修改
+      const MAX_ATTENDEES = 15;
+
       // 系統與身分狀態
       const [isLoading, setIsLoading] = useState(true);
       const [sysError, setSysError] = useState(null);
@@ -56,7 +59,7 @@
       // 介面控制
       const [activeTab, setActiveTab] = useState('board'); // 'board' | 'admin'
       const [toast, setToast] = useState(null);
-      const [isUserMenuOpen, setIsUserMenuOpen] = useState(false); // 🌟 新增：控制下拉選單狀態
+      const [isUserMenuOpen, setIsUserMenuOpen] = useState(false); // 控制下拉選單狀態
 
       // CF 資料狀態
       const [cfData, setCfData] = useState([]);
@@ -177,7 +180,8 @@
               if (cls.id === classId) {
                 const attendees = cls.attendees || [];
                 const isAttending = attendees.includes(currentUser.name);
-                if (!isAttending && attendees.length >= 12) return cls;
+                // 🌟 修改：使用 MAX_ATTENDEES 判斷報名人數是否已滿
+                if (!isAttending && attendees.length >= MAX_ATTENDEES) return cls;
 
                 return {
                   ...cls,
@@ -298,7 +302,6 @@
               <button onClick={() => setActiveTab('admin')} className={`px-4 py-2 rounded-lg font-bold text-xs transition-colors ${activeTab === 'admin' ? 'bg-emerald-500 text-[#0a1a12]' : 'text-gray-500'}`}>新增活動</button>
             </div>
             
-            {/* 🌟 修改：右側使用者選單改為下拉式 */}
             <div className="relative text-right ml-4 shrink-0">
               <div 
                 className="cursor-pointer group" 
@@ -455,7 +458,9 @@
                   {(currentMonthData?.classes || []).map((cls, index) => {
                     const attendees = cls.attendees || [];
                     const isAttending = attendees.includes(currentUser?.name);
-                    const isFull = attendees.length >= 12;
+                    
+                    // 🌟 修改：使用 MAX_ATTENDEES 判斷是否額滿
+                    const isFull = attendees.length >= MAX_ATTENDEES; 
                     const isLocked = currentMonthData.isPaid;
                     const canJoin = (!isLocked) && (isAttending || !isFull);
                     
@@ -477,7 +482,8 @@
                               </div>
                               <div className="text-xs text-gray-400 flex items-center gap-1">
                                 <Users className="w-3.5 h-3.5" />
-                                <span>已報名: <strong className={`ml-1 ${isFull ? 'text-red-400' : 'text-emerald-400'}`}>{attendees.length}</strong> / 12 人</span>
+                                {/* 🌟 修改：顯示字串從 / 12 人改為 / {MAX_ATTENDEES} 人 */}
+                                <span>已報名: <strong className={`ml-1 ${isFull ? 'text-red-400' : 'text-emerald-400'}`}>{attendees.length}</strong> / {MAX_ATTENDEES} 人</span>
                               </div>
                             </div>
                           </div>
